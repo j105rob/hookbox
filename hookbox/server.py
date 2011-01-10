@@ -90,47 +90,55 @@ class HookboxServer(object):
         self._accept(rtjp_conn)
         
     def run(self):
-        if not self._bound_socket:
-            self._bound_socket = eventlet.listen((self.config.interface, self.config.port))
-        eventlet.spawn(eventlet.wsgi.server, self._bound_socket, self._root_wsgi_app, log=EmptyLogShim())
+        try:
+            if not self._bound_socket:
+                logger.info("hookbox no bound socket calling eventlet.listen for: %s:%s", self.config.interface, self.config.port)
+                # rweiss add wrap_ssl(listen(addr), server_side=True) need a switch in config...
+                # self._bound_socket = eventlet.listen((self.config.interface, self.config.port))
+                self._bound_socket = eventlet.wrap_ssl(eventlet.listen((self.config.interface, self.config.port)), server_side=True, certfile="/etc/apache2/certs/cert.pem")
+            eventlet.spawn(eventlet.wsgi.server, self._bound_socket, self._root_wsgi_app, log=EmptyLogShim())
+            
+            # We can't get the main interface host, port from config, in case it
+            # was passed in directly to the constructor as a bound sock.
+            main_host, main_port = self._bound_socket.getsockname()
+            logger.info("Listening to hookbox on http://%s:%s", main_host, main_port)
+    
+            # Possibly create bound_api_socket
+            if not self._bound_api_socket:
+                api_host, api_port = self.config.web_api_interface, self.config.web_api_port
+                if api_host is None: api_host = main_host
+                if api_port is None: api_port = main_port
+                if (main_host, main_port) != (api_host, api_port):
+                    self._bound_api_socket = eventlet.listen((api_host, api_port))
+                    
+            # If we have a _bound_api_socket at this point, (either from constructor, 
+            # or previous block) we should turn it into a wsgi server.
+            if self._bound_api_socket:
+                  logger.info("Listening to hookbox/webapi on http://%s:%s", *self._bound_api_socket.getsockname())
+                  api_url_map = urlmap.URLMap()
+                  # Maintain /web path
+                  api_url_map['/web'] = self._web_api_app
+                  # Might as well expose it over / as well
+                  api_url_map['/'] = self._web_api_app
+                  eventlet.spawn(eventlet.wsgi.server, self._bound_api_socket, api_url_map, log=EmptyLogShim())
+                  
+            # otherwise, expose the web api over the main interface/wsgi app
+            else:
+                self._root_wsgi_app['/web'] = self._web_api_app
+            
+            ev = eventlet.event.Event()
+            self._rtjp_server.listen(sock=self.csp)
+            eventlet.spawn(self._run, ev)
+            return ev
+        except Exception, e:
+            logger.exception("Error: %s", e)
         
-        # We can't get the main interface host, port from config, in case it
-        # was passed in directly to the constructor as a bound sock.
-        main_host, main_port = self._bound_socket.getsockname()
-        logger.info("Listening to hookbox on http://%s:%s", main_host, main_port)
-
-        # Possibly create bound_api_socket
-        if not self._bound_api_socket:
-            api_host, api_port = self.config.web_api_interface, self.config.web_api_port
-            if api_host is None: api_host = main_host
-            if api_port is None: api_port = main_port
-            if (main_host, main_port) != (api_host,  api_port):
-                self._bound_api_socket = eventlet.listen((api_host, api_port))
-                
-        # If we have a _bound_api_socket at this point, (either from constructor, 
-        # or previous block) we should turn it into a wsgi server.
-        if self._bound_api_socket:
-              logger.info("Listening to hookbox/webapi on http://%s:%s", *self._bound_api_socket.getsockname())
-              api_url_map = urlmap.URLMap()
-              # Maintain /web path
-              api_url_map['/web'] = self._web_api_app
-              # Might as well expose it over / as well
-              api_url_map['/'] = self._web_api_app
-              eventlet.spawn(eventlet.wsgi.server, self._bound_api_socket, api_url_map, log=EmptyLogShim())
-              
-        # otherwise, expose the web api over the main interface/wsgi app
-        else:
-            self._root_wsgi_app['/web'] = self._web_api_app
-        
-        ev = eventlet.event.Event()
-        self._rtjp_server.listen(sock=self.csp)
-        eventlet.spawn(self._run, ev)
-        return ev
 
     def __call__(self, environ, start_response):
         return self._root_wsgi_app(environ, start_response)
 
     def _accept(self, rtjp_conn):
+        logger.info("Accepting connection")
         conn = protocol.HookboxConn(self, rtjp_conn, self.config, rtjp_conn._sock.environ.get('HTTP_X_FORWARDED_FOR', ''))
         conn.run()
 
@@ -139,11 +147,12 @@ class HookboxServer(object):
         #       To use some other wsgi server than eventlet.wsgi
         while True:
             try:
+                logger.info("In run")
                 rtjp_conn = self._rtjp_server.accept().wait()
                 if not rtjp_conn:
                     continue
                 access_logger.info("Incoming CSP connection\t%s\t%s",
-                    rtjp_conn._sock.environ.get('HTTP_X_FORWARDED_FOR', rtjp_conn._sock.environ.get('REMOTE_ADDR', '')), 
+                    rtjp_conn._sock.environ.get('HTTP_X_FORWARDED_FOR', rtjp_conn._sock.environ.get('REMOTE_ADDR', '')),
                     rtjp_conn._sock.environ.get('HTTP_HOST'))
                 eventlet.spawn(self._accept, rtjp_conn)
 #                conn = protocol.HookboxConn(self, rtjp_conn, self.config)
@@ -158,9 +167,10 @@ class HookboxServer(object):
             full_path = self.config['cb_single_url']
         if full_path:
             u = urlparse.urlparse(full_path)
-            scheme, host, port, path = u.scheme, u.hostname, u.port or 80, u.path
-            if self.config['cbtrailingslash'] and not path.endswith('/'):
-                path += '/'
+            scheme = u.scheme
+            host = u.hostname
+            port = u.port or 80
+            path = u.path
             if u.query:
                 path += '?' + u.query
         else:
@@ -169,8 +179,6 @@ class HookboxServer(object):
 #                host = self.base_host
 #            else:
             path = self.base_path + '/' + self.config.get('cb_' + path_name)
-            if self.config['cbtrailingslash'] and not path.endswith('/'):
-                path += '/'
             scheme = self.config["cbhttps"] and "https" or "http"
             host = self.config["cbhost"]
             port = self.config["cbport"]
@@ -195,9 +203,11 @@ class HookboxServer(object):
 
         # for logging
         if port != 80:
-            host = "%s:%s" % (host, port)
-        url = urlparse.urlunparse((scheme, host, '', '', '', ''))
-
+            url = urlparse.urlunparse((scheme, host + ":" + str(port), '', '', '', ''))
+        else:
+            url = urlparse.urlunparse((scheme, host, '', '', '', ''))
+       
+        
         headers = {'content-type': 'application/x-www-form-urlencoded'}
         if cookie_string:
             headers['Cookie'] = cookie_string
@@ -234,7 +244,7 @@ class HookboxServer(object):
         if not isinstance(output[1], dict):
             self.admin.webhook_event(path_name, url, response.status_int, False, body, form_body, cookie_string, "response[1] != json object")
             raise ExpectedException("Invalid response (expected json object in response index 1)")
-        output[1] = dict([(str(k), v) for (k,v) in output[1].items()])
+        output[1] = dict([(str(k), v) for (k, v) in output[1].items()])
         err = ""
         if not output[0]:
             err = output[1].get('msg', "(No reason given)")
@@ -252,6 +262,7 @@ class HookboxServer(object):
 #    def _webhook_error
 
     def connect(self, conn):
+        logger.info("Hookbox connect")
         form = { 'conn_id': conn.id }
         success, options = self.http_request('connect', conn.get_cookie(), form, conn=conn)
         if not success:
