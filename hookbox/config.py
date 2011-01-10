@@ -59,6 +59,11 @@ class HookboxOptionParser(object):
                           dest="web_api_interface", type="string",
                           default=defaults._web_api_interface, metavar="WEBAPIINTERFACE",
                           help="bind web api listening socket to WEBAPIINTERFACE, (default: %default)")
+        #rweiss add support for SSL/TLS
+        parser.add_option("-ssl","--ssl",
+                  dest="ssl", action="store_true",
+                  default=defaults._ssl, metavar="SSL",
+                  help="Use https wrapper (instead of http) to make csp calls.")
     
     def _add_callback_interface_options(self, parser, defaults):
         """ add options related to the hookbox callbacks """
@@ -86,10 +91,6 @@ class HookboxOptionParser(object):
                           dest="cbhttps", action="store_true",
                           default=defaults._cbhttps, metavar="HTTPS",
                           help="Use https (instead of http) to make callbacks.")
-        parser.add_option("--cbtrailingslash",
-                          dest="cbtrailingslash", action="store_true",
-                          default=defaults._cbtrailingslash,
-                          help="Append a trailing slash to the callback URL.")
     
     def _add_callback_path_options(self, parser, defaults):
         parser.add_option('--cb-connect', 
@@ -166,7 +167,7 @@ class HookboxConfig(object):
     defaults._cookie_identifier = NoDefault()
     defaults._webhook_secret = NoDefault()
     defaults._cbhttps = False
-    defaults._cbtrailingslash = False
+    defaults._ssl = False
     defaults._cb_connect = 'connect'
     defaults._cb_disconnect = 'disconnect'
     defaults._cb_create_channel = 'create_channel'
