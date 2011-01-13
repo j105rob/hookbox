@@ -60,7 +60,7 @@ class HookboxOptionParser(object):
                           default=defaults._web_api_interface, metavar="WEBAPIINTERFACE",
                           help="bind web api listening socket to WEBAPIINTERFACE, (default: %default)")
         #rweiss add support for SSL/TLS
-        parser.add_option("-ssl","--ssl",
+        parser.add_option("-S","--ssl",
                   dest="ssl", action="store_true",
                   default=defaults._ssl, metavar="SSL",
                   help="Use https wrapper (instead of http) to make csp calls.")

@@ -13,7 +13,8 @@ exports.connect = function(url, cookieString) {
 	}
 	var p = new HookBoxProtocol(url, cookieString);
 	if (window.WebSocket) {
-		jsioConnect(p, 'websocket', {url: url.replace('http://', 'ws://') + 'ws' });
+		//j105rob git mcarter/hookbox issue 68
+		jsioConnect(p, 'websocket', {url: url.replace('http://', 'ws://').replace('https://', 'wss://') + 'ws' });
 		p.connectionLost = bind(p, '_connectionLost', 'websocket');
 	}
 	else {

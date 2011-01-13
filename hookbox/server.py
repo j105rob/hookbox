@@ -93,9 +93,13 @@ class HookboxServer(object):
         try:
             if not self._bound_socket:
                 logger.info("hookbox no bound socket calling eventlet.listen for: %s:%s", self.config.interface, self.config.port)
-                # rweiss add wrap_ssl(listen(addr), server_side=True) need a switch in config...
-                # self._bound_socket = eventlet.listen((self.config.interface, self.config.port))
-                self._bound_socket = eventlet.wrap_ssl(eventlet.listen((self.config.interface, self.config.port)), server_side=True, certfile="/etc/apache2/certs/cert.pem")
+                # j105rob add ssl support
+                if self.config.ssl:
+                    logger.info("Wrapping socket in SSL")
+                    self._bound_socket = eventlet.wrap_ssl(eventlet.listen((self.config.interface, self.config.port)), server_side=True, certfile="/etc/apache2/certs/cert.pem")
+                else:
+                    logger.info("Socket not configured to support SSL")
+                    self._bound_socket = eventlet.listen((self.config.interface, self.config.port))
             eventlet.spawn(eventlet.wsgi.server, self._bound_socket, self._root_wsgi_app, log=EmptyLogShim())
             
             # We can't get the main interface host, port from config, in case it
