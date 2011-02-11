@@ -94,7 +94,8 @@ class HookboxServer(object):
             if not self._bound_socket:
                 logger.info("hookbox no bound socket calling eventlet.listen for: %s:%s", self.config.interface, self.config.port)
                 # j105rob add ssl support
-                if self.config.ssl:
+                #logger.info("WSGI URL Scheme is: %s",self._root_wsgi_app['wsgi.url_scheme']);
+                if self.config.ssl:                    
                     logger.info("Wrapping socket in SSL")
                     self._bound_socket = eventlet.wrap_ssl(eventlet.listen((self.config.interface, self.config.port)), server_side=True, certfile="/etc/apache2/certs/cert.pem")
                 else:
@@ -152,6 +153,7 @@ class HookboxServer(object):
         while True:
             try:
                 logger.info("In run")
+                #logger.info("WSGI URL Scheme is: %s",ev['wsgi.url_scheme']);
                 rtjp_conn = self._rtjp_server.accept().wait()
                 if not rtjp_conn:
                     continue
@@ -210,7 +212,8 @@ class HookboxServer(object):
             url = urlparse.urlunparse((scheme, host + ":" + str(port), '', '', '', ''))
         else:
             url = urlparse.urlunparse((scheme, host, '', '', '', ''))
-       
+            
+        logger.info('URL for webhook is: %s',url)
         
         headers = {'content-type': 'application/x-www-form-urlencoded'}
         if cookie_string:
@@ -220,7 +223,8 @@ class HookboxServer(object):
         body = None
         try:
             try:
-                http = Resource(url, pool_instance=self.pool)
+                http = Resource(url, pool_instance=self.pool, certfile="/etc/apache2/certs/cert.pem") #need to pass in ssl cert if ssl conn...
+                #certfile="/etc/apache2/certs/cert.pem"
                 response = http.request(method='POST', path=path, payload=form_body, headers=headers)
                 body = response.body_string()
             except socket.error, e:
@@ -284,6 +288,7 @@ class HookboxServer(object):
         eventlet.spawn(self.maybe_auto_subscribe, user, options, conn=conn)
 
     def disconnect(self, conn):
+        logger.info("Hookbox disconnect")
         self.admin.user_event('disconnect', conn.user.get_name(), { "id": conn.id})
         self.admin.connection_event('disconnect', conn.id, conn.serialize())
         del self.conns[conn.id]
